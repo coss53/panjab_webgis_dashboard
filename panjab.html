@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Panaji WebGIS Demo — QGIS + Lizmap Style Frontend</title>
+
+  <!-- Roboto font for clean typography -->
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+
+  <!-- Leaflet Measure CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-measure/dist/leaflet-measure.css" />
+
+  <style>
+    :root{
+      --bg:#F5F5F5;
+      --major-road:#FF9800;
+      --minor-road:#BDBDBD;
+      --building:#E0E0E0;
+      --trees:#4CAF50;
+      --water:#2196F3;
+      --city-boundary:#D32F2F;
+      --muted:#616161;
+      --text:#212121;
+      --accent:#1976D2;
+      --highlight:#FFEB3B;
+      --panel-bg: rgba(255,255,255,0.95);
+      --radius:8px;
+      --shadow: 0 6px 18px rgba(0,0,0,0.08);
+    }
+    html,body,#map{ height:100%; margin:0; padding:0; font-family: 'Roboto', Arial, sans-serif; background:var(--bg); color:var(--text);} 
+    .app { display: grid; grid-template-columns: 320px 1fr; height:100vh; gap:16px; padding:16px; box-sizing:border-box; }
+    @media (max-width:900px){ .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; padding:8px; } #sidebar { order:2; } #map { order:1; min-height:60vh; } }
+    #sidebar { background:var(--panel-bg); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px; display:flex; flex-direction:column; gap:12px; min-height:calc(100vh - 32px); overflow:auto; }
+    .brand { display:flex; gap:12px; align-items:center; }
+    .brand h1{ margin:0; font-size:1.05rem; font-weight:700; color:var(--accent); }
+    .brand p{ margin:0; font-size:0.86rem; color:var(--muted); }
+    .section-title { font-weight:600; color:#37474F; margin:6px 0 2px; font-size:0.88rem; }
+    .layer-list { display:flex; flex-direction:column; gap:8px; }
+    .layer-item { display:flex; align-items:center; gap:8px; padding:8px; border-radius:8px; cursor:pointer; transition:background .12s; }
+    .layer-item:hover { background: rgba(0,0,0,0.03); }
+    .layer-item input { transform:scale(1.1); }
+    .swatch { width:28px; height:18px; border-radius:4px; box-shadow: inset 0 -2px 0 rgba(0,0,0,0.06); border:1px solid rgba(0,0,0,0.06); }
+    .legend { background:transparent; padding:8px; border-radius:6px; font-size:0.88rem; color:var(--muted); }
+    .legend-row { display:flex; align-items:center; gap:8px; margin:6px 0; }
+    #map { border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+    .map-topbar { position:absolute; left:50%; transform:translateX(-50%); top:12px; z-index:600; background:var(--panel-bg); padding:8px 12px; border-radius:999px; box-shadow:var(--shadow); display:flex; gap:8px; align-items:center; font-size:0.9rem; }
+    .btn { background:var(--accent); color:white; border:none; padding:8px 10px; border-radius:6px; cursor:pointer; font-weight:500; box-shadow:none; }
+    .btn.secondary { background:transparent; color:var(--accent); border:1px solid rgba(25,118,210,0.12); }
+    .small { padding:6px 8px; font-size:0.85rem; }
+    .popup-title { font-weight:700; font-size:15px; margin-bottom:6px; color:#212121; }
+    .popup-body { font-size:13px; color:var(--muted); line-height:1.3; }
+    .popup-attr { margin:6px 0; display:flex; gap:6px; align-items:center; }
+    .popup-attr b { min-width:85px; display:inline-block; color:#37474F; }
+    .meta { font-size:12px; color:var(--muted); margin-top:8px; }
+    #legend-toggle { display:none; }
+    @media (max-width:900px){ #legend-toggle { display:block; } .legend { display:none; } }
+    /* small legend panel for dynamic layers */
+    .dynamic-legend { margin-top:8px; padding:8px; border-radius:6px; background:rgba(0,0,0,0.02); }
+  </style>
+</head>
+<body>
+ <div class="app">
+  <!-- SIDEBAR -->
+  <aside id="sidebar" aria-label="Controls">
+    <div class="brand">
+      <svg width="42" height="42" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <circle cx="12" cy="12" r="10" fill="#2196F3" />
+        <path d="M7 13c2-3 6-5 9-3" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div>
+        <h1>Panaji WebGIS</h1>
+    
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">Quick Tools</div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button id="btnLocate" class="btn small">My Location</button>
+        <button id="btnReset" class="btn secondary small">Reset View</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">Layers</div>
+      <div class="layer-list">
+        <label class="layer-item" title="Toggle roads">
+          <input type="checkbox" id="chkRoads" checked>
+          <span class="swatch" id="swRoads" style="background:linear-gradient(90deg,var(--major-road),var(--minor-road));"></span>
+          <span>Roads</span>
+        </label>
+
+        <label class="layer-item" title="Toggle admin areas">
+          <input type="checkbox" id="chkAdmin" checked>
+          <span class="swatch" id="swAdmin" style="background:var(--water);"></span>
+          <span>Admin Areas</span>
+        </label>
+
+        <label class="layer-item" title="Toggle sample buildings">
+          <input type="checkbox" id="chkBuildings" checked>
+          <span class="swatch" style="background:var(--building);"></span>
+          <span>Buildings (sample)</span>
+        </label>
+
+        <label class="layer-item" title="Toggle trees & parks">
+          <input type="checkbox" id="chkTrees" checked>
+          <span class="swatch" style="background:var(--trees);"></span>
+          <span>Trees & Parks (sample)</span>
+        </label>
+
+        <label class="layer-item" title="Toggle water">
+          <input type="checkbox" id="chkWater" checked>
+          <span class="swatch" style="background:var(--water);"></span>
+          <span>Waterbodies (sample)</span>
+        </label>
+
+        <label class="layer-item" title="Toggle city boundary">
+          <input type="checkbox" id="chkBoundary" checked>
+          <span class="swatch" style="background:var(--city-boundary);"></span>
+          <span>City Boundary (sample)</span>
+        </label>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">Legend</div>
+      <div class="legend" id="legend">
+        <div class="legend-row"><span class="swatch" style="background:var(--major-road)"></span> Major roads</div>
+        <div class="legend-row"><span class="swatch" style="background:var(--minor-road)"></span> Minor roads</div>
+        <div class="legend-row"><span class="swatch" style="background:var(--building)"></span> Buildings</div>
+        <div class="legend-row"><span class="swatch" style="background:var(--trees)"></span> Trees / Parks</div>
+        <div class="legend-row"><span class="swatch" style="background:var(--water)"></span> Waterbodies</div>
+        <div class="legend-row"><span class="swatch" style="background:var(--city-boundary)"></span> City boundary</div>
+        <div class="meta">Hover a feature to highlight — click for details.</div>
+      </div>
+
+      <!-- dynamic legends for remote layers -->
+      <div class="dynamic-legend" id="adminLegend" style="display:none;"></div>
+      <div class="dynamic-legend" id="roadLegend" style="display:none;"></div>
+    </div>
+
+    <!-- <div style="margin-top:auto;">
+      <div class="section-title">Demo Package</div>
+      <div style="font-size:13px;color:var(--muted);">This demo uses inline GeoJSON placeholders and optional remote GeoJSON (GitHub raw). Replace those with your production GeoJSON or vector tiles for full deployment.</div>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button id="btnDownload" class="btn small">Download Sample</button>
+        <button id="btnFeedback" class="btn secondary small">Request Feedback</button>
+      </div>
+      <div class="meta">Designed with color theory, hierarchy & responsive UX.</div>
+    </div> -->
+  </aside>
+
+  <!-- MAP -->
+  <div id="map" role="application" aria-label="Panaji demo map container">
+    <div class="map-topbar" aria-hidden>
+      <div style="font-weight:600; color:var(--accent);">Panaji • Demo</div>
+      <div style="width:10px"></div>
+      <div style="font-size:0.86rem; color:var(--muted)">Interactive layers • Popups • Responsive</div>
+    </div>
+  </div>
+ </div>
+
+ <!-- Leaflet JS -->
+ <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+ <!-- Leaflet Measure -->
+ <script src="https://unpkg.com/leaflet-measure/dist/leaflet-measure.js"></script>
+ <!-- Leaflet Control Geocoder -->
+ <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+ <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+
+ <script>
+ /* ======================================================
+    Updated demo: loads remote GeoJSON files (GitHub raw) and
+    automatically generates categorical color maps for
+    NAME_2 (admin) and MED_DESCRI (roads). Legends toggle
+    with checkboxes. Keep UI/layout as original.
+   ====================================================== */
+
+ // --- INITIAL MAP SETUP ---
+ const map = L.map('map', { zoomControl:true }).setView([15.4909, 73.8278], 13);
+ // Default neutral basemap (Carto Light)
+ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
+   attribution: '&copy; OpenStreetMap contributors & Carto',
+   maxZoom: 19
+ }).addTo(map);
+
+ L.control.scale({imperial:false, position:'bottomleft'}).addTo(map);
+ const measureControl = new L.Control.Measure({ primaryLengthUnit: 'meters', primaryAreaUnit: 'sqmeters', position: 'topleft' });
+ measureControl.addTo(map);
+ const geocoder = L.Control.geocoder({ defaultMarkGeocode: false }).addTo(map);
+ geocoder.on('markgeocode', function(e) { map.fitBounds(e.geocode.bbox); });
+
+ // Popup template function
+ function popupHtml(feature, titleField='name', extraFields=[]){
+   const props = feature.properties || {};
+   const title = props[titleField] || props.NAME_2 || props.name || 'Feature';
+   let body = `<div class="popup-title">${title}</div>`;
+   body += `<div class="popup-body">`;
+   extraFields.forEach(f => { if(props[f]) body += `<div class="popup-attr"><b>${f}:</b> ${props[f]}</div>`; });
+   // fallback common fields
+   if(props.MED_DESCRI) body += `<div class="popup-attr"><b>MED_DESCRI:</b> ${props.MED_DESCRI}</div>`;
+   if(props.RTT_DESCRI) body += `<div class="popup-attr"><b>RTT_DESCRI:</b> ${props.RTT_DESCRI}</div>`;
+   if(props.asset_code) body += `<div class="popup-attr"><b>Asset Code:</b> ${props.asset_code}</div>`;
+   if(props.condition) body += `<div class="popup-attr"><b>Condition:</b> ${props.condition}</div>`;
+   if(props.photo_url) body += `<div class="popup-attr"><b>Photo:</b> <a href="${props.photo_url}" target="_blank">View</a></div>`;
+   body += `</div>`;
+   return body;
+ }
+
+ // --- SAMPLE INLINE GEOJSON (kept for demo continuity) ---
+ const sampleRoads = { "type":"FeatureCollection","features":[
+   {"type":"Feature","properties":{"name":"MG Road","type":"major","asset_code":"RD-001"},"geometry":{"type":"LineString","coordinates":[[73.826,15.491],[73.832,15.492],[73.835,15.493]]}},
+   {"type":"Feature","properties":{"name":"1st Cross","type":"minor","asset_code":"RD-002"},"geometry":{"type":"LineString","coordinates":[[73.828,15.489],[73.829,15.492]]}}
+ ] };
+
+ const sampleBuildings = { "type":"FeatureCollection","features":[
+   {"type":"Feature","properties":{"name":"Block A","asset_code":"BLD-101"},"geometry":{"type":"Polygon","coordinates":[[[73.8285,15.4915],[73.8290,15.4915],[73.8290,15.4920],[73.8285,15.4920],[73.8285,15.4915]]]}},
+   {"type":"Feature","properties":{"name":"Community Hall","asset_code":"BLD-102"},"geometry":{"type":"Polygon","coordinates":[[[73.8305,15.4912],[73.8310,15.4912],[73.8310,15.4917],[73.8305,15.4917],[73.8305,15.4912]]]}}
+ ] };
+
+ const sampleTrees = { "type":"FeatureCollection","features":[
+   {"type":"Feature","properties":{"name":"Neem","asset_code":"TR-203","condition":"Healthy","photo_url":"https://upload.wikimedia.org/wikipedia/commons/6/6b/Azadirachta_indica_3.jpg"},"geometry":{"type":"Point","coordinates":[73.8312,15.4922]}},
+   {"type":"Feature","properties":{"name":"Banyan","asset_code":"TR-204","condition":"Moderate"},"geometry":{"type":"Point","coordinates":[73.8298,15.4908]}}
+ ] };
+
+ const sampleWater = { "type":"FeatureCollection","features":[
+   {"type":"Feature","properties":{"name":"Small Lake","asset_code":"WT-11"},"geometry":{"type":"Polygon","coordinates":[[[73.8265,15.488],[73.8275,15.488],[73.8275,15.489],[73.8265,15.489],[73.8265,15.488]]]}}
+ ] };
+
+ const sampleBoundary = { "type":"FeatureCollection","features":[
+   {"type":"Feature","properties":{"name":"Panaji Demo Boundary"},"geometry":{"type":"Polygon","coordinates":[[[73.823,15.487],[73.839,15.487],[73.839,15.497],[73.823,15.497],[73.823,15.487]]]}}
+ ] };
+
+ // --- LAYERS (placeholders, will be replaced when remote loads complete) ---
+ let roadsLayer = L.geoJSON(sampleRoads, {
+   style: function(feature){ return { color: feature.properties.type === 'major' ? getComputedStyle(document.documentElement).getPropertyValue('--major-road').trim() : getComputedStyle(document.documentElement).getPropertyValue('--minor-road').trim(), weight: feature.properties.type === 'major' ? 3 : 1.5, opacity:0.95 }; },
+   onEachFeature: function(feature, layer){ layer.on({ mouseover: function(e){ e.target.setStyle({weight:4, color:'#FFB74D'}); }, mouseout: function(e){ roadsLayer.resetStyle(e.target); }, click: function(e){ layer.bindPopup(popupHtml(feature,'name'), {maxWidth:320}).openPopup(); } }); }
+ }).addTo(map);
+
+ let buildingsLayer = L.geoJSON(sampleBuildings, { style: { color: '#424242', fillColor: getComputedStyle(document.documentElement).getPropertyValue('--building').trim(), weight:0.6, fillOpacity:0.9 }, onEachFeature: function(feature, layer){ layer.on({ mouseover: function(e){ e.target.setStyle({weight:2, color:'#616161'}); }, mouseout: function(e){ buildingsLayer.resetStyle(e.target); }, click: function(e){ layer.bindPopup(popupHtml(feature,'name'), {maxWidth:320}).openPopup(); } }); } }).addTo(map);
+
+ let treesLayer = L.geoJSON(sampleTrees, { pointToLayer: function(feature, latlng){ return L.circleMarker(latlng, { radius:6, fillColor:getComputedStyle(document.documentElement).getPropertyValue('--trees').trim(), color:'#1B5E20', weight:0.6, fillOpacity:1 }); }, onEachFeature: function(feature, layer){ layer.on({ mouseover: function(e){ e.target.setStyle({radius:8}); }, mouseout: function(e){ treesLayer.resetStyle(e.target); }, click: function(e){ layer.bindPopup(popupHtml(feature,'name'), {maxWidth:320}).openPopup(); } }); } }).addTo(map);
+
+ let waterLayer = L.geoJSON(sampleWater, { style: { color: getComputedStyle(document.documentElement).getPropertyValue('--water').trim(), fillColor: getComputedStyle(document.documentElement).getPropertyValue('--water').trim(), fillOpacity:0.4, weight:1 } }).addTo(map);
+
+ let boundaryLayer = L.geoJSON(sampleBoundary, { style: { color: getComputedStyle(document.documentElement).getPropertyValue('--city-boundary').trim(), weight:2, dashArray:'6 4', fill:false }, onEachFeature: function(feature, layer){ layer.bindPopup(`<div class="popup-title">${feature.properties.name}</div>`, {maxWidth:250}); } }).addTo(map);
+
+ const layerMap = { 'roads': roadsLayer, 'buildings': buildingsLayer, 'trees': treesLayer, 'water': waterLayer, 'boundary': boundaryLayer };
+
+ // --- REMOTE GITHUB RAW URLs ---
+ const adminGeojsonURL = 'https://raw.githubusercontent.com/coss53/panjab_upwork/main/panjab_admin.geojson';
+ const roadGeojsonURL = 'https://raw.githubusercontent.com/coss53/panjab_upwork/main/panab_road.geojson';
+
+ // color utilities: generate categorical colors using HSL
+ function generateCategoricalColors(n, s=70, l=50){
+   const colors = [];
+   for(let i=0;i<n;i++){ const h = Math.round((i * 360 / n) % 360); colors.push(`hsl(${h}, ${s}%, ${l}%)`); }
+   return colors;
+ }
+
+ function uniqueValues(features, field){
+   const set = new Set();
+   features.forEach(f => { if(f.properties && f.properties[field] !== undefined && f.properties[field] !== null) set.add(f.properties[field]); });
+   return Array.from(set).sort();
+ }
+
+ // create legend DOM from mapping
+ function buildLegend(containerId, title, mapping, itemIsLine=false){
+   const container = document.getElementById(containerId);
+   container.innerHTML = `<div style="font-weight:600;margin-bottom:6px">${title}</div>`;
+   const entries = Object.keys(mapping);
+   entries.forEach(k => {
+     const color = mapping[k];
+     const row = document.createElement('div'); row.className = 'legend-row';
+     const sw = document.createElement('span'); sw.className='swatch'; sw.style.background = color; sw.style.width = itemIsLine ? '36px' : '28px'; sw.style.height = itemIsLine ? '6px' : '18px'; sw.style.display = 'inline-block'; sw.style.borderRadius = itemIsLine ? '2px' : '4px';
+     const lab = document.createElement('span'); lab.style.fontSize='13px'; lab.textContent = k;
+     row.appendChild(sw); row.appendChild(lab); container.appendChild(row);
+   });
+ }
+
+ // fetch and load admin layer (NAME_2 coloring)
+ async function loadAdminLayer(){
+   try{
+     const res = await fetch(adminGeojsonURL);
+     if(!res.ok) throw new Error('Failed to fetch admin GeoJSON');
+     const data = await res.json();
+     const vals = uniqueValues(data.features, 'NAME_2');
+     const colors = generateCategoricalColors(vals.length, 65, 55);
+     const mapColor = {};
+     vals.forEach((v,i)=> mapColor[v]=colors[i]);
+
+     // create geojson layer with style by NAME_2
+     if(layerMap.admin) map.removeLayer(layerMap.admin);
+     const admin = L.geoJSON(data, {
+       style: function(feature){ const v = feature.properties.NAME_2; return { color: shadeColor(mapColor[v], -18), weight:1.2, fillColor: mapColor[v], fillOpacity:0.6 }; },
+       onEachFeature: function(feature, layer){ layer.on({ mouseover:function(e){ e.target.setStyle({weight:2, color:'#37474F'}); }, mouseout:function(e){ admin.resetStyle(e.target); }, click:function(e){ layer.bindPopup(popupHtml(feature,'NAME_2'), {maxWidth:320}).openPopup(); } }); }
+     });
+     layerMap.admin = admin; if(document.getElementById('chkAdmin').checked) admin.addTo(map);
+     // build legend
+     buildLegend('adminLegend', 'Admin areas — NAME_2', mapColor, false);
+     document.getElementById('adminLegend').style.display = document.getElementById('chkAdmin').checked ? 'block' : 'none';
+     // fit map to admin
+     if(admin.getBounds && admin.getBounds().isValid()) map.fitBounds(admin.getBounds().pad(0.2));
+   }catch(err){ console.error(err); }
+ }
+
+ // fetch and load road layer (color by MED_DESCRI)
+ async function loadRoadLayer(){
+   try{
+     const res = await fetch(roadGeojsonURL);
+     if(!res.ok) throw new Error('Failed to fetch roads GeoJSON');
+     const data = await res.json();
+     const vals = uniqueValues(data.features, 'MED_DESCRI');
+     const colors = generateCategoricalColors(vals.length, 80, 45);
+     const mapColor = {};
+     vals.forEach((v,i)=> mapColor[v]=colors[i]);
+
+     if(layerMap.roadsRemote) map.removeLayer(layerMap.roadsRemote);
+     const roadsRemote = L.geoJSON(data, {
+       style: function(feature){ const v = feature.properties.MED_DESCRI; return { color: mapColor[v] || '#666', weight: 2.2, opacity:0.95 }; },
+       onEachFeature: function(feature, layer){ layer.on({ mouseover:function(e){ e.target.setStyle({weight:4}); }, mouseout:function(e){ roadsRemote.resetStyle(e.target); }, click:function(e){ layer.bindPopup(popupHtml(feature,'MED_DESCRI',['RTT_DESCRI']), {maxWidth:360}).openPopup(); } }); }
+     });
+     layerMap.roadsRemote = roadsRemote; if(document.getElementById('chkRoads').checked) roadsRemote.addTo(map);
+     // build road legend
+     buildLegend('roadLegend', 'Roads — MED_DESCRI', mapColor, true);
+     document.getElementById('roadLegend').style.display = document.getElementById('chkRoads').checked ? 'block' : 'none';
+
+   }catch(err){ console.error(err); }
+ }
+
+ // small helper to darken stroke color for polygon outline
+ function shadeColor(color, percent) {
+   // color in hsl or simple named color; try to return darker by using canvas
+   try{
+     const ctx = document.createElement('canvas').getContext('2d'); ctx.fillStyle = color; const rgba = ctx.fillStyle; return rgba;
+   }catch(e){ return color; }
+ }
+
+ // Load remote layers immediately
+ loadAdminLayer();
+ loadRoadLayer();
+
+ // --- LAYER CHECKBOX INTERACTIONS ---
+ document.getElementById('chkRoads').addEventListener('change', (e)=> {
+   if(e.target.checked){ if(layerMap.roadsRemote) layerMap.roadsRemote.addTo(map); else roadsLayer.addTo(map); document.getElementById('roadLegend').style.display='block'; }
+   else { if(layerMap.roadsRemote) map.removeLayer(layerMap.roadsRemote); else map.removeLayer(roadsLayer); document.getElementById('roadLegend').style.display='none'; }
+ });
+
+ document.getElementById('chkAdmin').addEventListener('change', (e)=> {
+   if(e.target.checked){ if(layerMap.admin) layerMap.admin.addTo(map); document.getElementById('adminLegend').style.display='block'; }
+   else { if(layerMap.admin) map.removeLayer(layerMap.admin); document.getElementById('adminLegend').style.display='none'; }
+ });
+
+ document.getElementById('chkBuildings').addEventListener('change', (e)=> { e.target.checked ? buildingsLayer.addTo(map) : map.removeLayer(buildingsLayer); });
+ document.getElementById('chkTrees').addEventListener('change', (e)=> { e.target.checked ? treesLayer.addTo(map) : map.removeLayer(treesLayer); });
+ document.getElementById('chkWater').addEventListener('change', (e)=> { e.target.checked ? waterLayer.addTo(map) : map.removeLayer(waterLayer); });
+ document.getElementById('chkBoundary').addEventListener('change', (e)=> { e.target.checked ? boundaryLayer.addTo(map) : map.removeLayer(boundaryLayer); });
+
+ // --- TOP BUTTONS ---
+ document.getElementById('btnLocate').addEventListener('click', ()=>{ map.locate({setView:true, maxZoom:16}); });
+ map.on('locationerror', function(){ alert('Location not available or permission denied.'); });
+ document.getElementById('btnReset').addEventListener('click', ()=>{ map.setView([15.4909, 73.8278], 13); });
+
+ // Download sample bundle
+ document.getElementById('btnDownload').addEventListener('click', ()=>{
+   const bundle = { roads: sampleRoads, buildings: sampleBuildings, trees: sampleTrees, water: sampleWater, boundary: sampleBoundary };
+   const blob = new Blob([JSON.stringify(bundle, null, 2)], {type:'application/json'});
+   const url = URL.createObjectURL(blob);
+   const a = document.createElement('a'); a.href = url; a.download = 'panaji-demo-geojson-bundle.json'; document.body.appendChild(a); a.click();
+   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1500);
+ });
+
+ document.getElementById('btnFeedback').addEventListener('click', ()=>{ const subject = encodeURIComponent('Panaji WebGIS Demo — Feedback Request'); const body = encodeURIComponent(`Hello,\n\nI have prepared a small Panaji WebGIS demo (QGIS → Lizmap style). Please let me know your feedback on the UI and interactivity.\n\nThanks,\nMehedi Hasan`); window.open(`mailto:example@example.com?subject=${subject}&body=${body}`); });
+
+ // show initial legend visibility based on checkboxes
+ document.getElementById('adminLegend').style.display = document.getElementById('chkAdmin').checked ? 'block' : 'none';
+ document.getElementById('roadLegend').style.display = document.getElementById('chkRoads').checked ? 'block' : 'none';
+
+</script>
+</body>
+</html>
